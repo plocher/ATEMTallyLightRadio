@@ -1,5 +1,3 @@
-Tally Light control using RFM69 data radios and AdaFruit RadioFeathers
-
 Inspired by the BMD SDI shield and Skaarhoj's ATEM demo code
 and work done by kvITkoConsulting back in 2016
 
