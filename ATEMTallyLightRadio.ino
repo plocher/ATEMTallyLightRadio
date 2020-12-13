@@ -47,6 +47,7 @@
  *    0000   TRANSMITTER connected to SDI shield
  */
 
+//#define DEBUG_SERIAL        // Don't turn on in production
 #define TALLY_BRIGHT 100    // how bright should RED/PROGRAM be displayed?
 #define TALLY_DIM      3    // Preview and standby don't need to be so bright - save energy and don't blind the cast...
 #define STATUS_BRIGHT 10    // the transmitter uses the neopixels to show what cameras are in use...
@@ -62,27 +63,27 @@
  */
 class Config {
   public:
-    Config(void) {
-        pinMode(12, INPUT_PULLUP);
-        pinMode(11, INPUT_PULLUP);
-        pinMode(10, INPUT_PULLUP);
-        pinMode( 9, INPUT_PULLUP);
+    Config(void) {                    // TX_TEST  SDI   RX_TEST  Tally
+        pinMode(12, INPUT_PULLUP);    // -na-     -na-    -na-   Addr 0
+        pinMode(11, INPUT_PULLUP);    // GND      GND     5v     Addr 1
+        pinMode(10, INPUT_PULLUP);    // GND      5v      5v     Addr 2
+        pinMode( 9, INPUT_PULLUP);    // GND      GND     GND    5v
         _camera  = 0;
         _persona = TALLY;
-        _test    = 0;
 
-        if (digitalRead(12)) {                                                                    //  xxx 1 TALLY on Camera
-            _persona = TALLY;
-            _camera  = digitalRead(11) * 1 +
-                       digitalRead(10) * 2 +
-                       digitalRead( 9) * 4 +
-                       1;                     // camera IDs are 1..8, not 0..7
-        } else if ((digitalRead(12) == 0) && (digitalRead(11) == 1) && (digitalRead(10) == 0)) {  // x 0 1 0 TX Test mode
-            _persona = TX_TEST;
-        } else if ((digitalRead(12) == 0) && (digitalRead(11) == 0) && (digitalRead(10) == 1)) {  // x 1 0 0 RSSI Meter mode
-            _persona = RX_TEST;
-        } else {                                                                                  // x 0 0 0 transmitter base station with SDI Card 
-            _persona = TRANSMITTER;
+        if (digitalRead(9)) {                                    //  1 xxx  TALLY on Camera
+            _persona = TALLY;                                    //    rest of pins are camera address
+            _camera  = digitalRead(12) * 1 +
+                       digitalRead(11) * 2 +
+                       digitalRead(10) * 4 + 1;  // camera IDs are 1..8, not 0..7
+        } else {
+            if (       (digitalRead(10) == 0) && (digitalRead(11) == 0)) {  // 0 0 0 x TX Test mode
+                _persona = TX_TEST;
+            } else if ((digitalRead(10) == 1) && (digitalRead(11) == 1)) {  // 0 1 1 x RSSI Meter mode
+                _persona = RX_TEST;
+            } else if ((digitalRead(10) == 1) && (digitalRead(11) == 0)) {  // 0 1 0 x transmitter base station with SDI Card 
+                _persona = TRANSMITTER;
+            }
         }
     }
 
@@ -95,24 +96,20 @@ class Config {
     
   private:
     byte _persona;
-    bool _test;
     byte _camera;
 };
 
 Config *conf;
 
 
-// rf69 demo from RadioHead69 / Adafruit
-// Example sketch showing how to create a simple messageing client
-// with the RH_RF69 class. RH_RF69 class does not provide for addressing or
-// reliability, so you should only use RH_RF69  if you do not need the higher
-// level messaging abilities.
-// Demonstrates the use of AES encryption, setting the frequency and modem 
-// configuration
+// rf69 demo from RadioHead69 / Adafruit:
+//     RH_RF69 class does not provide for addressing or
+//     reliability, so you should only use RH_RF69  if you do not need the higher
+//     level messaging abilities.  
+// These limitations are OK for this use case.
 
 #include <SPI.h>
 #include <RH_RF69.h>    // 
-
 
 /************ Radio Setup ***************/
 
@@ -178,7 +175,7 @@ Config *conf;
 RH_RF69 rf69(RFM69_CS, RFM69_INT);
 
 /*
- * Packet contents
+ * Packet contents - an array of bytes
  * 
  * [ <4 byte ID> <version> <PROGRAM #> <PREVIEW #> ] 
  * [ 'A' 'T' 'E' 'M' 1 [0-16] [0-16]
@@ -225,13 +222,13 @@ Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 BMD_SDITallyControl_I2C sdiTallyControl(0x6E);            // define the Tally object using I2C using the default shield address
 
 
-void setup() 
-{
+void setup() {
+#ifdef DEBUG_SERIAL
     Serial.begin(115200);
     delay(1000);
-    //while (!Serial) { delay(1); } // wait until serial console is open, remove if not tethered to computer
+    while (!Serial) { delay(1); } // wait until serial console is open, remove if not tethered to computer
     Serial.println("Tally Light Feather RFM69");
-
+#endif
     
     // These lines are specifically to support the Adafruit Trinket 5V 16 MHz.
     // Any other board, you can remove this part (but no harm leaving it):
@@ -241,7 +238,9 @@ void setup()
     // END of Trinket-specific code.
     
     strip.begin();            // INITIALIZE NeoPixel strip object (REQUIRED)
+    strip.fill(strip.Color(  0,   0,   0), 0, 8);
     strip.show();             // Turn OFF all pixels ASAP
+    
     strip.setBrightness(10);  // Set BRIGHTNESS (max = 255)
 
     strip.fill(strip.Color(255, 255, 255), 0, 8); strip.show(); delay(100);
@@ -251,15 +250,21 @@ void setup()
     strip.fill(strip.Color(  0,   0,   0), 0, 8); strip.show(); 
 
     conf = new Config();
+#ifdef DEBUG_SERIAL
     if (conf->isTally()) {
         Serial.print("Tally Camera: ");Serial.println(conf->camera() );
     }
     if (conf->isTransmitter()) {
         Serial.print("TALLY Transmitter ");
-        if (conf->isTXTest()) { Serial.print("TEST MODE "); }
-        Serial.println();
     }
-
+    if (conf->isTXTest()) { 
+        Serial.print("TX TEST MODE ");
+    }
+    if (conf->isRXTest()) { 
+        Serial.print("RX TEST MODE ");
+    }
+    Serial.println();
+#endif
     pinMode(RFM69_RST, OUTPUT);
     digitalWrite(RFM69_RST, LOW);
     
@@ -271,7 +276,9 @@ void setup()
     delay(10);
     
     if (!rf69.init()) {
+#ifdef DEBUG_SERIAL
       Serial.println("RFM69 radio init failed");
+#endif
       while (1) {
           // Flash in an attention getting form...
           strip.fill(strip.Color(255,   0,   0), 0, 8); strip.show(); delay(100);
@@ -282,7 +289,9 @@ void setup()
     // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM (for low power module)
     // No encryption
     if (!rf69.setFrequency(RF69_FREQ)) {
+#ifdef DEBUG_SERIAL
         Serial.println("setFrequency failed");
+#endif
     }
     
     // If you are using a high power RF69 eg RFM69HW, you *must* set a Tx power with the
@@ -323,7 +332,7 @@ byte lastpreview = 0;
 void loop() {
   
     if (conf->isTXTest()) {
-        delay(1000);  // Wait a bit between cycles, could also 'sleep' here!
+        delay(1000);  // Wait a bit between cycles, could also 'sleep' here if using a battery!
         payload.preview = payload.program;
         payload.program += 1;
         if (payload.program > conf->numCameras()) { payload.program = 1; }      
